@@ -54,55 +54,22 @@ bool TSPoint::operator==(TSPoint t) {
 
 bool TSPoint::operator!=(TSPoint t) {
   return ((t.x != x) || (t.y != y) || (t.z != z));
-
 }
 
 TouchScreen::TouchScreen(TFT_eSPI &tft, uint8_t xp, uint8_t yp, uint8_t xm, uint8_t ym) : _tft(tft) {
   _xm = xm, _xp = xp, _ym = ym, _yp = yp;
-
-  // Resolve GPIO bitmasks
-  _xm_mask = digitalPinToBitMask(_xm);
-  _xp_mask = digitalPinToBitMask(_xp);
-  _ym_mask = digitalPinToBitMask(_ym);
-  _yp_mask = digitalPinToBitMask(_yp);
-  
-  // Resolve RTC GPIO if available for preferred pins
-  if (rtc_gpio_is_valid_gpio((gpio_num_t)xm))
-    _xm_rtc = rtc_io_number_get((gpio_num_t)xm);
-  else
-    _xm_rtc = -1;
-  
-  if (rtc_gpio_is_valid_gpio((gpio_num_t)yp))
-    _yp_rtc = rtc_io_number_get((gpio_num_t)yp);
-  else
-    _yp_rtc;
-}
-
-void TouchScreen::setPin(uint32_t mask) {
-  GPIO.out_w1ts = mask & ~3;
-  GPIO.out1_w1tc.data = mask & 3;
-}
-
-void TouchScreen::clearPin(uint32_t mask) {
-  GPIO.out_w1tc = mask & ~3;
-  GPIO.out1_w1tc.data = mask & 3;
 }
 
 void TouchScreen::storePinState(void) {
-  _oldMode = GPIO.enable & ~3;
-  _oldMode |= GPIO.enable1.data & 3;
-  _oldState = GPIO.out & ~3;
-  _oldState |= GPIO.out1.data & 3;
+  _oldMode = (uint64_t)GPIO.enable1.data << 32 | (uint64_t)GPIO.enable;
+  _oldState = (uint64_t)GPIO.out1.data << 32 | (uint64_t)GPIO.out;
 }
 
 void TouchScreen::restorePinState(void) {
-  ((_oldMode & _xm) > 0) ? pinMode(_xm, OUTPUT) : pinMode(_xm, INPUT);
-  ((_oldMode & _xp) > 0) ? pinMode(_xp, OUTPUT) : pinMode(_xp, INPUT);
-  ((_oldMode & _ym) > 0) ? pinMode(_ym, OUTPUT) : pinMode(_ym, INPUT);
-  ((_oldMode & _yp) > 0) ? pinMode(_yp, OUTPUT) : pinMode(_yp, INPUT);
-
-  setPin(_oldState & (_xm_mask | _xp_mask | _ym_mask | _yp_mask));
-  clearPin(~_oldState & (_xm_mask | _xp_mask | _ym_mask | _yp_mask));
+  GPIO.enable = (uint32_t)_oldMode;
+  GPIO.enable1.data = (uint32_t)(_oldMode >> 32);
+  GPIO.out = (uint32_t)_oldState;
+  GPIO.out1.data = (uint32_t)(_oldState >> 32);
 }
 
 bool TouchScreen::getTouch(int16_t *x, int16_t *y) {
@@ -159,15 +126,14 @@ int16_t TouchScreen::readTouchX(void) {
 
   gpio_num_t ym = (gpio_num_t)_ym;
   gpio_num_t yp = (gpio_num_t)_yp;
-  // Prepare RTC pins
-  rtc_gpio_init(ym);
-  rtc_gpio_init(yp);
 
-  rtc_gpio_set_direction(ym, RTC_GPIO_MODE_INPUT_ONLY);
+  // Prepare input pin
+  rtc_gpio_init(yp);
+  gpio_set_direction(ym, GPIO_MODE_INPUT);
   rtc_gpio_set_direction(yp, RTC_GPIO_MODE_INPUT_ONLY);
-  rtc_gpio_pullup_dis(ym);
+  gpio_pullup_dis(ym);
   rtc_gpio_pullup_dis(yp);
-  rtc_gpio_pulldown_en(ym);
+  gpio_pulldown_en(ym);
   rtc_gpio_pulldown_en(yp);
 
   // Prepare digital pins
@@ -187,8 +153,7 @@ int16_t TouchScreen::readTouchX(void) {
   int16_t value = arr_filter(samples) - ADC_NOISE_TRESHOLD;
   if (value < 0) value = 0;
 
-  // Restore RTC pins
-  rtc_gpio_deinit(ym);
+  // Restore input pins
   rtc_gpio_deinit(yp);
 
   // Restore current pin state
@@ -204,17 +169,15 @@ int16_t TouchScreen::readTouchY(void) {
   gpio_num_t xm = (gpio_num_t)_xm;
   gpio_num_t xp = (gpio_num_t)_xp;
 
-  // Prepare RTC pins
+  // Prepare input pins
   rtc_gpio_init(xm);
-  rtc_gpio_init(xp);
-
   rtc_gpio_set_direction(xm, RTC_GPIO_MODE_INPUT_ONLY);
-  rtc_gpio_set_direction(xp, RTC_GPIO_MODE_INPUT_ONLY);
+  gpio_set_direction(xp, GPIO_MODE_INPUT);
   rtc_gpio_pullup_dis(xm);
-  rtc_gpio_pullup_dis(xp);
+  gpio_pullup_dis(xp);
   rtc_gpio_pulldown_en(xm);
-  rtc_gpio_pulldown_en(xp);
-
+  gpio_pulldown_en(xp);
+  
   // Prepare digital pins
   pinMode(_ym, OUTPUT);
   pinMode(_yp, OUTPUT);
@@ -232,9 +195,8 @@ int16_t TouchScreen::readTouchY(void) {
   int16_t value = arr_filter(samples) - ADC_NOISE_TRESHOLD;
   if (value < 0) value = 0;
 
-  // Restore RTC pins
+  // Restore input pins
   rtc_gpio_deinit(xm);
-  rtc_gpio_deinit(xp);
 
   // Restore current pin state
   restorePinState();
@@ -397,18 +359,9 @@ void TouchScreen::debug(void) {
   Serial.println("== TOUCHSCREEN DEBUG INFO ==");
   Serial.println("-- GPIO --");
   Serial.print("XM GPIO pin: "); Serial.println(_xm);
-  Serial.print("XM BIT MASK: "); Serial.println(_xm_mask);
-  Serial.print("XM RTC pin:  "); Serial.println(_xm_rtc);
-
   Serial.print("XP GPIO pin: "); Serial.println(_xp);
-  Serial.print("XM BIT MASK: "); Serial.println(_xp_mask);
-
   Serial.print("YM GPIO pin: "); Serial.println(_ym);
-  Serial.print("XM BIT MASK: "); Serial.println(_ym_mask);
-
   Serial.print("YP GPIO pin: "); Serial.println(_yp);
-  Serial.print("XM BIT MASK: "); Serial.println(_yp_mask);
-  Serial.print("YP RTC pin:  "); Serial.println(_yp_rtc);
 
   Serial.println();
   Serial.println("-- READINGS --");

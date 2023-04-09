@@ -19,8 +19,6 @@ class TouchScreen {
   public:
     TouchScreen(TFT_eSPI &tft, uint8_t xp, uint8_t yp, uint8_t xm, uint8_t ym);
 
-    void setPin(uint32_t mask);
-    void clearPin(uint32_t mask);
     void storePinState(void);
     void restorePinState(void);
 
@@ -40,10 +38,8 @@ class TouchScreen {
     TFT_eSPI &_tft;
 
     uint8_t _xm, _xp, _ym, _yp;
-    uint8_t _xm_rtc, _yp_rtc;
-    uint32_t _xm_mask, _xp_mask, _ym_mask, _yp_mask;
-    uint32_t _oldMode;
-    uint32_t _oldState;
+    uint64_t _oldMode;
+    uint64_t _oldState;
 
     uint16_t _calib_x0 = 300, _calib_x1 = 3600, _calib_y0 = 300, _calib_y1 = 3600;
     uint8_t _calib_rotate = 1, _calib_x_inv = 2, _calib_y_inv = 0;
